@@ -1,0 +1,134 @@
+name: Rust
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+env:
+  BINSTALL_DISABLE_TELEMETRY: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          lfs: true
+
+      - name: Get git lfs files
+        run: git lfs pull
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo binary installer
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Doc tests
+        run: cargo test --workspace --doc
+
+  coverage:
+    runs-on: ubuntu-latest
+    needs: build-test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: coverage
+
+      - name: Install cargo-tarpaulin
+        run: cargo install cargo-tarpaulin --locked
+
+      - name: Run coverage
+        run: |
+          cargo tarpaulin \
+            --workspace \
+            --exclude-files 'src/main.rs' \
+            --out Xml \
+            --output-dir coverage \
+            --timeout 120
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ github.sha }}
+          path: coverage/cobertura.xml
+          if-no-files-found: warn
+
+  binary-size:
+    runs-on: ubuntu-latest
+    needs: build-test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: binary-size
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Record binary size
+        run: |
+          SIZE_BYTES=$(stat -c%s target/release/sesoko)
+          SIZE_HUMAN=$(ls -lh target/release/sesoko | awk '{print $5}')
+          echo "${SIZE_BYTES}" > binary_size.txt
+          echo "## Binary Size Report" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Metric | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Size (bytes) | ${SIZE_BYTES} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Size (human) | ${SIZE_HUMAN} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Commit | ${{ github.sha }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Ref | ${{ github.ref_name }} |" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install cargo-bloat
+        run: cargo install cargo-bloat --locked
+
+      - name: Generate bloat report
+        run: cargo bloat --release --crates -n 20 > bloat_report.txt
+
+      - name: Add bloat report to summary
+        run: |
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Top Crate Contributions" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat bloat_report.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload binary size artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-size-${{ github.sha }}
+          path: |
+            binary_size.txt
+            bloat_report.txt
+

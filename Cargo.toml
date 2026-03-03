@@ -1,0 +1,38 @@
+[package]
+name = "sesoko"
+version = "0.1.0"
+edition = "2021"
+description = "Image captioning and content-aware cropping for martial arts imagery"
+license = "MIT"
+repository = "https://github.com/jukka/sesoko"
+keywords = ["image", "yolo", "captioning", "crop", "martial-arts"]
+categories = ["multimedia::images", "command-line-utilities"]
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "sesoko"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+image = "0.25"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+walkdir = "2"
+candle-core = "0.9"
+candle-nn = "0.9"
+candle-transformers = "0.9"
+tokenizers = { version = "0.21", default-features = false, features = ["fancy-regex"] }
+tempfile = "3"
+clap = { version = "4", features = ["derive"] }
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ version }-{ target }.{ archive-format }"
+bin-dir = "{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"

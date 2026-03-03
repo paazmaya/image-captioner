@@ -2,196 +2,284 @@
 
 > Prepare images for training machine learning models
 
-Two key features:
-* Image captioning for martial arts imagery using **Qwen3-VL-2B-Instruct**
-* Content aware cropping by using YOLO11
+Two core features:
 
-## Architecture
+- **Image captioning** using native candle inference (Qwen3-VL-2B-Instruct, CPU)
+- **Content-aware cropping** to square JPEG using YOLO v8 object detection (candle backend, CPU)
 
-The project uses a shared image handling library (`src/lib/image_utils.py`) to provide common functionality:
+## Prerequisites
 
-- **Image Format Support**: Supports 15+ image formats including JPEG, PNG, GIF, WebP, TIFF, HEIC/HEIF, AVIF, JPEG XL, and more
-- **Image Loading**: Safe image opening with automatic RGB conversion and HEIF support
-- **Image Processing**: Aspect-ratio preserving resizing and square cropping without upscaling or padding
-- **Optimized Output**: JPEG encoding with quality 85 optimization
-
-## Quick Start
+### Caption model (required for captioning)
 
 ```bash
-# Install dependencies
-uv sync
-
-# Generate captions for images
-uv run python src/caption_images.py "path/to/images"
-
-# Crop images based on object detection
-uv run python src/crop_yolo.py --input-dir my_images --output-dir cropped_images
+hf download Qwen/Qwen3-VL-2B-Instruct --local-dir models/Qwen3-VL-2B-Instruct
 ```
 
-## Utility Scripts
+Expected path: `models/Qwen3-VL-2B-Instruct/` relative to the current working directory.
+Override with `--model-path` on the `caption` subcommand.
 
-This project provides two main scripts for preparing images for machine learning training:
+### YOLO model (required only for content-aware cropping)
 
-### 1. Image Captioning with Qwen3-VL
-
-Generate detailed captions for images using **Qwen3-VL-2B-Instruct** model.
-
-**Features:**
-- 🚀 Ultra-fast inference with greedy decoding
-- 💾 Minimal VRAM (~4-6 GB) - fits on any modern GPU
-- ✨ High quality captions for martial arts images
-- 🔄 Streaming writes - recovers from interruptions
-- 📝 Plain text output - no markdown formatting
-
-**Basic Usage:**
+The default workflow and `sesoko crop` without `--crop-focus` use a pure center crop
+and **do not need YOLO**.  Only needed when you pass `--crop-focus <class>`:
 
 ```bash
-uv run python scripts/caption_images.py "path/to/images"
+hf download lmz/candle-yolo-v8 yolov8n.safetensors --local-dir models/candle-yolo-v8
 ```
 
-Output will be saved to `captions.toml` in the current folder and as sidecar `.txt` files alongside each image.
+Expected path: `models/candle-yolo-v8/yolov8n.safetensors` relative to cwd.
+Override with `--model-path` on the `crop` subcommand.
 
-**Advanced Options:**
+## CLI
+
+### Install
 
 ```bash
-# Custom output path
-uv run python scripts/caption_images.py "path/to/images" -o my_captions.toml
-
-# Disable sidecar files (TOML only)
-uv run python scripts/caption_images.py "path/to/images" --no-sidecar
-
-# Write sidecar files to a different directory
-uv run python scripts/caption_images.py "Dropbox\images" --sidecar-dir "captions"
+cargo install sesoko
 ```
 
-**Output Format:**
+### Default workflow — crop + caption in one step
 
-TOML file organized by folder absolute path:
-```toml
-["/absolute/path/to/images/folder"]
-"image1.jpg" = "Caption text here..."
-"image2.jpg" = "Another caption..."
-```
-
-Sidecar `.txt` files (optional):
-```
-images/
-  photo1.jpg
-  photo1.jpg.txt     # Contains the caption
-  photo2.jpg
-  photo2.jpg.txt
-```
-
-**Configuration:**
-
-To use the higher-quality 4B model instead, edit the model ID in `scripts/caption_images.py` (~line 86):
-```python
-model_id = "Qwen/Qwen3-VL-4B-Instruct"
-```
-
-**Model Specs:**
-- 2B: ~4-6 GB VRAM, ultra-fast
-- 4B: ~6-8 GB VRAM, higher quality
-
-**Supported Image Formats:**
-- `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.bmp`, `.heic`, `.heif`, `.avif`
-
-**Troubleshooting:**
-
-- **OOM (Out of Memory):** Use 2B model or reduce image size in `resize_image()` (currently 896x896)
-- **Permission denied:** Use `--no-sidecar` or `--sidecar-dir` for cloud storage (Dropbox, OneDrive, etc.)
-- **Slow inference:** Ensure CUDA is properly detected with `nvidia-smi`, check Flash Attention 2 installation
-
-### 2. Image Cropping with YOLO11
-
-Detect and crop objects in images to square format using **YOLO11 segmentation**.
-
-All output images are **square** without padding or upscaling. The script crops to the smaller dimension of the image, ensuring native resolution quality. Images are saved as optimized JPEG files (quality 85) for efficient storage.
-
-**Basic Usage:**
+Center-crops every image to a 512×512 JPEG, then writes a caption `.txt` sidecar next to
+each output image and a summary `captions.toml`.  No YOLO required.
 
 ```bash
-# List all available object classes
-uv run python scripts/crop_yolo.py --list-classes
-
-# Center crop all images to square (512x512)
-uv run python scripts/crop_yolo.py --input-dir my_images --output-dir cropped_images
+sesoko ./raw_images ./output
 ```
 
-**Advanced Options:**
+**File discovery:** top-level images only (not recursive).  
+**Output filenames:** `{stem}.jpg` — the original extension is replaced with `.jpg`.
+If two input files share the same stem (e.g. `photo.png` and `photo.webp`), a counter
+is appended to avoid overwriting: the second becomes `photo_1.jpg`, the third
+`photo_2.jpg`, and so on.  
+**Caption sidecars:** written as `{original_filename}.txt` (e.g. `photo.jpg` →
+`photo.jpg.txt`), so caption files are always distinct even when stems collide.
+
+### Crop images to squares
+
+**File discovery:** top-level images only (not recursive).  
+**Output filenames:** `{stem}.jpg` — the original extension is always replaced with `.jpg`.
+If two input files share the same stem (e.g. `photo.png` and `photo.jpg`), a counter
+is appended to the second and subsequent files: `photo_1.jpg`, `photo_2.jpg`, etc.  
+**Supported formats:** `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.bmp`, `.tiff`,
+`.tif`, `.heic`, `.heif`, `.avif`, `.jxl`, `.psd`, `.ico`.
+
+Center-crop (no YOLO, no `--crop-focus`):
 
 ```bash
-# Crop focusing on specific objects (person, face, dog, etc.)
-uv run python scripts/crop_yolo.py \
-  --input-dir my_images \
-  --output-dir cropped_images \
-  --crop-focus person \
-  --resolution 1024
-
-# Save processing statistics
-uv run python scripts/crop_yolo.py \
-  --input-dir my_images \
-  --output-dir cropped_images \
-  --crop-focus face \
-  --stats stats.json
+sesoko crop --input-dir ./raw_images --output-dir ./cropped
 ```
 
-**Features:**
-- Content-aware object detection using YOLO11
-- Square output (no padding, no upscaling) - crops to smallest dimension
-- JPEG format with quality 85 and optimization for minimal file size
-- Smart filtering - skips images without target object
-- Detailed processing statistics (JSON output)
-- Supports any YOLO-detectable object class
-
-**Output Format:**
-- All images are cropped to square (smallest input dimension)
-- Then resized to the specified resolution (default 512x512)
-- Saved as optimized JPEG files (quality 85) in the output directory
-
----
-
-### 3. Model Precision Conversion
-
-Convert models to reduced precision formats for smaller file sizes and faster inference.
-
-**Basic Usage:**
+Content-aware crop focused on the detected object class (requires YOLO weights):
 
 ```bash
-# Convert to bfloat16 (default)
-uv run python scripts/convert_floats.py --input H:/my-model
-
-# Convert to float8 e4m3fn (higher precision)
-uv run python scripts/convert_floats.py --input H:/my-model --dtype e4m3fn
-
-# Convert single safetensors file
-uv run python scripts/convert_floats.py --input H:/models/model.safetensors
+sesoko crop \
+    --input-dir  ./raw_images \
+    --output-dir ./cropped \
+    --crop-focus person \
+    --resolution 512
 ```
 
-**Supported Formats:** `bf16`, `e4m3fn`, `e5m2`
+Save processing statistics to a JSON file:
 
----
+```bash
+sesoko crop \
+    --input-dir ./raw_images \
+    --output-dir ./cropped \
+    --crop-focus person \
+    --stats stats.json
+```
 
-## Requirements
+List all YOLO-detectable object classes:
 
-- **Python:** 3.11+
-- **GPU:** CUDA-capable NVIDIA GPU
-- **VRAM:** 
-  - Image captioning (2B): ~4-6 GB
-  - Image captioning (4B): ~6-8 GB
-  - Cropping: ~2-4 GB
+```bash
+sesoko crop --list-classes
+```
 
-### Setup
+Use a custom YOLO weights file:
 
-1. Install CUDA 13 drivers from [NVIDIA](https://developer.nvidia.com/cuda-downloads)
-2. Verify CUDA availability: `uv run python -c "import torch; print(torch.cuda.is_available())"`
+```bash
+sesoko crop \
+    --input-dir ./raw_images \
+    --output-dir ./cropped \
+    --model-path /path/to/yolov8n.safetensors \
+    --crop-focus person
+```
 
-## Notes
+### Caption images
 
-- Image captioning focuses on martial arts imagery with plain text output
-- GPU cache is cleared after each image to prevent memory fragmentation
-- Streaming writes enable recovery from interruptions
-- All scripts process images sequentially
+**File discovery:** recursive — all images in the folder and any subfolders.  
+**Sidecar filenames:** `{original_filename}.txt` (e.g. `photo.jpg` → `photo.jpg.txt`),
+placed next to the source image. Files with different extensions but the same stem
+(`photo.png` and `photo.jpg`) each get their own distinct sidecar.  
+**TOML output:** keyed by absolute input folder path, then by path relative to that
+folder.  Running the command again on the same folder updates existing entries.
+
+Generate captions for all images in a folder (recursive), writing a TOML summary and
+per-image sidecar `.txt` files next to each image:
+
+```bash
+sesoko caption ./images
+```
+
+Write captions to a custom TOML output file:
+
+```bash
+sesoko caption ./images --output my_captions.toml
+```
+
+Disable sidecar `.txt` files (TOML only):
+
+```bash
+sesoko caption ./images --no-sidecar
+```
+
+Write sidecar files to a separate directory (mirror of input structure):
+
+```bash
+sesoko caption ./images --sidecar-dir ./sidecars
+```
+
+Use a custom model directory:
+
+```bash
+sesoko caption ./images --model-path /path/to/Qwen3-VL-2B-Instruct
+```
+
+## Library
+
+Add to your project:
+
+```bash
+cargo add sesoko
+```
+
+### Content-aware cropping
+
+```rust
+use sesoko::crop::YOLOCropper;
+use sesoko::yolo_candle::build_candle_detector_with_default;
+use sesoko::image_utils::open_image;
+
+fn main() -> anyhow::Result<()> {
+    // Load YOLO detector (looks for models/candle-yolo-v8/yolov8n.safetensors)
+    let detector = build_candle_detector_with_default(None)?;
+
+    let cropper = YOLOCropper::new(Some("person".to_string()), 512)
+        .with_detector(detector);
+
+    // Process a single image
+    let image = open_image("photo.jpg".as_ref())?;
+    if let Some(cropped) = cropper.process_image(&image, /*skip_if_not_found=*/ true) {
+        cropped.save("cropped.jpg")?;
+    }
+
+    // Process an entire folder
+    let stats = cropper.process_folder("./input", "./output", true)?;
+    println!("processed={} skipped={} failed={}",
+        stats.processed.len(), stats.skipped.len(), stats.failed.len());
+
+    Ok(())
+}
+```
+
+### Pure center crop (no model needed)
+
+```rust
+use sesoko::crop::YOLOCropper;
+use sesoko::image_utils::open_image;
+
+fn main() -> anyhow::Result<()> {
+    let cropper = YOLOCropper::new(None, 512); // no detector, center crop
+
+    let image = open_image("photo.jpg".as_ref())?;
+    let cropped = cropper.process_image(&image, false).unwrap();
+    cropped.save("cropped.jpg")?;
+    Ok(())
+}
+```
+
+### Image captioning
+
+```rust
+use sesoko::caption::{CandleVlmCaptionModel, CaptionModel, CaptionOptions, run_caption_folder, DEFAULT_CAPTION_PROMPT};
+use std::path::PathBuf;
+
+fn main() -> anyhow::Result<()> {
+    // Load from the default path (models/Qwen3-VL-2B-Instruct)
+    // or pass an explicit directory:
+    let model = CandleVlmCaptionModel::load("models/Qwen3-VL-2B-Instruct", DEFAULT_CAPTION_PROMPT)?;
+
+    // Caption a single image
+    let image = image::open("photo.jpg")?.into_rgb8().into();
+    let caption = model.generate_caption(&image)?;
+    println!("{caption}");
+
+    // Caption an entire folder, writing captions.toml and sidecar .txt files
+    let options = CaptionOptions {
+        folder: PathBuf::from("./images"),
+        output: PathBuf::from("captions.toml"),
+        no_sidecar: false,
+        sidecar_dir: None,
+    };
+    let captions = run_caption_folder(&model, &options)?;
+    println!("{} folders captioned", captions.0.len());
+
+    Ok(())
+}
+```
+
+### Image utilities
+
+```rust
+use sesoko::image_utils::{
+    get_image_files, open_image, resize_image_aspect_ratio,
+    crop_to_square, save_image_optimized,
+};
+
+fn main() -> anyhow::Result<()> {
+    // Discover all supported images recursively
+    let files = get_image_files("./photos".as_ref(), true)?;
+
+    for path in &files {
+        let img = open_image(path)?;                           // always returns RGB
+        let resized = resize_image_aspect_ratio(&img, 896);    // long edge → 896 px
+        let square = crop_to_square(&resized);                 // center square crop
+        save_image_optimized(&square, &path.with_extension("jpg"))?; // JPEG q85
+    }
+    Ok(())
+}
+```
+
+### Implementing a custom caption backend
+
+```rust
+use sesoko::caption::{CaptionModel, CaptionOptions, run_caption_folder};
+use image::DynamicImage;
+use std::path::PathBuf;
+
+struct MyCaptionBackend;
+
+impl CaptionModel for MyCaptionBackend {
+    fn generate_caption(&self, image: &DynamicImage) -> anyhow::Result<String> {
+        // call your own model / API here
+        Ok(format!("a martial arts image ({}×{})", image.width(), image.height()))
+    }
+}
+
+fn main() -> anyhow::Result<()> {
+    let model = MyCaptionBackend;
+    let options = CaptionOptions {
+        folder: PathBuf::from("./images"),
+        output: PathBuf::from("captions.toml"),
+        no_sidecar: true,
+        sidecar_dir: None,
+    };
+    run_caption_folder(&model, &options)?;
+    Ok(())
+}
+```
+
 
 ## License
 

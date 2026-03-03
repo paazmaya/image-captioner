@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            use_zigbuild: "true"
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            use_zigbuild: "true"
+          - target: x86_64-apple-darwin
+            os: macos-13
+            use_zigbuild: "false"
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            use_zigbuild: "false"
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            use_zigbuild: "false"
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Install cargo-binstall
+        if: matrix.use_zigbuild == 'true'
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install Zig and cargo-zigbuild
+        if: matrix.use_zigbuild == 'true'
+        run: |
+          pip3 install ziglang
+          cargo binstall cargo-zigbuild --secure -y
+
+      - name: Build (zigbuild)
+        if: matrix.use_zigbuild == 'true'
+        run: cargo zigbuild --release --target ${{ matrix.target }}
+
+      - name: Build (native)
+        if: matrix.use_zigbuild != 'true'
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package archive (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+          tar -czf "dist/sesoko-${VERSION}-${{ matrix.target }}.tar.gz" \
+            -C "target/${{ matrix.target }}/release" sesoko
+
+      - name: Package archive (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive `
+            -Path "target/${{ matrix.target }}/release/sesoko.exe" `
+            -DestinationPath "dist/sesoko-$version-${{ matrix.target }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sesoko-${{ matrix.target }}
+          path: dist/
+
+  release:
+    name: GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Image captioning and content-aware cropping for martial arts imagery"
 license = "MIT"
+authors = ["Juga Paazmaya <paazmaya@yahoo.com>"]
 repository = "https://github.com/jukka/sesoko"
 keywords = ["image", "yolo", "captioning", "crop", "martial-arts"]
 categories = ["multimedia::images", "command-line-utilities"]
@@ -30,6 +31,7 @@ tempfile = "3.26.0"
 clap = { version = "4.5.60", features = ["derive"] }
 
 [package.metadata.binstall]
+# https://github.com/cargo-bins/cargo-binstall
 pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ version }-{ target }.{ archive-format }"
 bin-dir = "{ bin }{ binary-ext }"
 pkg-fmt = "tgz"

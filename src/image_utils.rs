@@ -46,6 +46,7 @@ pub const SUPPORTED_IMAGE_EXTENSIONS: &[&str] = &[
 /// // Paths without an extension return false
 /// assert!(!is_supported_image_extension(Path::new("README")));
 /// ```
+#[inline]
 pub fn is_supported_image_extension(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())

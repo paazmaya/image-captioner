@@ -11,6 +11,8 @@ Two core features:
 
 ### Caption model (required for captioning)
 
+https://huggingface.co/docs/huggingface_hub/guides/cli
+
 ```bash
 hf download Qwen/Qwen3-VL-2B-Instruct --local-dir models/Qwen3-VL-2B-Instruct
 ```
@@ -21,7 +23,7 @@ Override with `--model-path` on the `caption` subcommand.
 ### YOLO model (required only for content-aware cropping)
 
 The default workflow and `sesoko crop` without `--crop-focus` use a pure center crop
-and **do not need YOLO**.  Only needed when you pass `--crop-focus <class>`:
+and **do not need YOLO**. Only needed when you pass `--crop-focus <class>`:
 
 ```bash
 hf download lmz/candle-yolo-v8 yolov8n.safetensors --local-dir models/candle-yolo-v8
@@ -41,7 +43,7 @@ cargo install sesoko
 ### Default workflow — crop + caption in one step
 
 Center-crops every image to a 512×512 JPEG, then writes a caption `.txt` sidecar next to
-each output image and a summary `captions.toml`.  No YOLO required.
+each output image and a summary `captions.toml`. No YOLO required.
 
 ```bash
 sesoko ./raw_images ./output
@@ -113,7 +115,7 @@ sesoko crop \
 placed next to the source image. Files with different extensions but the same stem
 (`photo.png` and `photo.jpg`) each get their own distinct sidecar.  
 **TOML output:** keyed by absolute input folder path, then by path relative to that
-folder.  Running the command again on the same folder updates existing entries.
+folder. Running the command again on the same folder updates existing entries.
 
 Generate captions for all images in a folder (recursive), writing a TOML summary and
 per-image sidecar `.txt` files next to each image:
@@ -280,6 +282,40 @@ fn main() -> anyhow::Result<()> {
 }
 ```
 
+## Training z-image-turbo Lora with ai-toolkit
+
+https://civitai.com/articles/25872/how-i-create-my-z-image-turbo-character-loras
+https://github.com/ostris/ai-toolkit/tree/main
+https://hub.docker.com/r/ostris/aitoolkit/tags
+https://huggingface.co/ostris/zimage_turbo_training_adapter
+
+- **Z-Image-Turbo** — from `Tongyi-MAI/Z-Image-Turbo` on HuggingFace (the bf16 `.safetensors` version is best for training)
+- **Training adapter** — from `ostris/zimage_turbo_training_adapter` on HuggingFace (there's a v1 and v2; start with v1, v2 is experimental)
+
+docker pull ostris/aitoolkit:latest
+
+```ps1
+docker run --rm --gpus all `
+  -p 7273:7273 `
+  -v "H:\zimage_turbo_training_adapter:/workspace/h" `
+  -v "H:\ComfyUI-user-data\models\diffusion_models\z:/workspace/z" `
+  -v "H:\training-budo-lora-2026-03:/workspace/train" `
+  ostris/aitoolkit:0.7.24
+```
+
+| Task                      | Detail                                                      |
+| ------------------------- | ----------------------------------------------------------- |
+| Pull Docker image         | `ostris/aitoolkit:latest` (~10GB)                           |
+| Download base model       | `Tongyi-MAI/Z-Image-Turbo` (bf16)                           |
+| Download training adapter | `ostris/zimage_turbo_training_adapter` (v1)                 |
+| Image resolution          | Your 512x512 is perfect for 12GB VRAM                       |
+| Dataset size              | 35–50+ images, balanced across each weapon/clothing concept |
+| Captioning                | Tag every concept visible in each image, consistently       |
+| Steps                     | 2000 to start                                               |
+| LR                        | 1e-4                                                        |
+| Transformer Offload       | **Must be 0%** (bug)                                        |
+| LoRA rank                 | 16                                                          |
+| Inference strength        | 0.55–0.75                                                   |
 
 ## License
 

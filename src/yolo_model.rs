@@ -37,6 +37,7 @@ impl Multiples {
     /// // Two calls return equal values
     /// assert_eq!(Multiples::n(), Multiples::n());
     /// ```
+    #[inline]
     pub fn n() -> Self {
         Self {
             depth: 0.33,
@@ -61,6 +62,7 @@ impl Multiples {
     ///
     /// assert_ne!(Multiples::s(), Multiples::n());
     /// ```
+    #[inline]
     pub fn s() -> Self {
         Self {
             depth: 0.33,
@@ -85,6 +87,7 @@ impl Multiples {
     ///
     /// assert_ne!(Multiples::m(), Multiples::s());
     /// ```
+    #[inline]
     pub fn m() -> Self {
         Self {
             depth: 0.67,
@@ -109,6 +112,7 @@ impl Multiples {
     ///
     /// assert_ne!(Multiples::l(), Multiples::m());
     /// ```
+    #[inline]
     pub fn l() -> Self {
         Self {
             depth: 1.00,
@@ -133,6 +137,7 @@ impl Multiples {
     ///
     /// assert_ne!(Multiples::x(), Multiples::l());
     /// ```
+    #[inline]
     pub fn x() -> Self {
         Self {
             depth: 1.00,
@@ -161,6 +166,7 @@ impl Multiples {
     /// // Extra-large: (320, 640, 640)
     /// assert_eq!(Multiples::x().filters(), (320, 640, 640));
     /// ```
+    #[inline]
     pub fn filters(&self) -> (usize, usize, usize) {
         let f1 = (256. * self.width) as usize;
         let f2 = (512. * self.width) as usize;

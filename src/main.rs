@@ -10,10 +10,10 @@ use sesoko::crop::YOLOCropper;
 
 #[derive(Parser, Debug)]
 #[command(name = "sesoko")]
-#[command(about = "Crop images to square JPEGs and generate caption .txt files")]
+#[command(about = "Crop images of various formats to square JPEGs and generate caption .txt files")]
 #[command(
-    long_about = "Crop a folder of images to square JPEGs and write a caption .txt sidecar\n\
-    next to each output image.\n\
+    long_about = "Crop a folder of various format images to square JPEGs and\n\
+    write a caption .txt sidecar next to each output image.\n\
     \n\
     USAGE:\n  \
     sesoko <INPUT_DIR> <OUTPUT_DIR>\n\
@@ -40,7 +40,7 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    #[command(about = "Generate captions for images using native Qwen3-VL candle inference")]
+    #[command(about = "Generate captions for images using Qwen3-VL")]
     Caption {
         #[arg(help = "Path to input folder containing images (searched recursively)")]
         folder: PathBuf,

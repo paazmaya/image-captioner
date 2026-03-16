@@ -1,0 +1,218 @@
+job: extension
+config:
+  # ── Job identity ────────────────────────────────────────────────────────────
+  # This name becomes the output folder under training_folder.
+  # Bump the version suffix (v1, v2 …) when you change rank, LR, or steps so
+  # each run has its own folder and you can compare checkpoints side-by-side.
+  name: "budo_lora_v1"
+
+  process:
+    - type: diffusion_trainer
+
+      # ── Output paths (Docker-mounted volumes) ───────────────────────────────
+      training_folder: "/workspace/train/output/budo_lora_v1"
+
+      # SQLite job-tracker DB — keep this on fast local disk inside the
+      # container, NOT on the mounted volume, to avoid I/O timeouts.
+      sqlite_db_path: "/tmp/aitoolkit_budo_lora.db"
+
+      device: "cuda:0"
+
+      # Print a loss/lr line every N steps so you can spot NaN early.
+      performance_log_every: 50
+
+      # ── No trigger word (concept/vocabulary LoRA) ────────────────────────────
+      # trigger_word is intentionally omitted.
+      #
+      # Instead of a single activation token, every concept word in your captions
+      # (sai, tonfa, hakama, gi, obi, belt colours, etc.) becomes its own trigger.
+      # When this LoRA is loaded and you type "sai" in a prompt, the model draws
+      # on what it learned specifically about sai.  "tonfa" triggers tonfa, etc.
+      #
+      # This means your .txt caption files carry ALL the training signal.
+      # Rules to follow strictly:
+      #   1. Only tag concepts that are VISUALLY PRESENT in the image.
+      #   2. Use a consistent vocabulary — pick one spelling per concept and
+      #      never vary it (e.g. always "bo staff", never "bo-staff" or "bō").
+      #   3. Include "japanese martial arts" in every caption as a domain anchor.
+      #   4. Keep captions short (5–8 tags).  More noise = weaker per-word signal.
+      #
+      # Example captions:
+      #   japanese martial arts, sai, gi, black belt, obi
+      #   japanese martial arts, tonfa, hakama, white belt, obi
+      #   japanese martial arts, bo staff, gi, brown belt
+
+      # ── LoRA network ─────────────────────────────────────────────────────────
+      # rank 16 is the recommended starting point for a small-dataset concept
+      # LoRA on Z-Image Turbo.  alpha == rank keeps the effective scaling at 1.
+      # If identity/concept recall is weak after the first run, raise to 32
+      # (both linear and conv) before touching LR or steps.
+      network:
+        type: "lora"
+        linear: 16
+        linear_alpha: 16
+        conv: 16
+        conv_alpha: 16
+
+      # ── Checkpoints ──────────────────────────────────────────────────────────
+      save:
+        dtype: "bf16"
+        save_every: 250          # checkpoint every 250 steps
+        max_step_saves_to_keep: 8
+        save_format: "diffusers"
+        push_to_hub: false
+
+      # ── Dataset ──────────────────────────────────────────────────────────────
+      datasets:
+        - folder_path: "/workspace/train/dataset/budo"  # Docker-mounted dataset folder
+          caption_ext: "txt"
+          default_caption: ""      # leave empty — you have per-image .txt files
+
+          # IMPORTANT for trigger-word-free training: keep dropout LOW (0.0–0.05).
+          # Caption dropout randomly discards the entire caption for a training step.
+          # With a trigger word the model still has the token to anchor on.
+          # Without one, frequent dropout trains the image with NO text signal,
+          # weakening per-word concept binding.  Do NOT raise above 0.05 here.
+          caption_dropout_rate: 0.05
+
+          # Pre-encode images to latents on the first epoch and cache to disk.
+          # Saves VRAM on subsequent epochs and speeds up training.
+          cache_latents_to_disk: true
+
+          # Keep this FALSE.  A known ai-toolkit bug causes a batch-size mismatch
+          # ("latents must be the same or half the batch size of text embeddings")
+          # when text embeddings are cached for Z-Image Turbo.
+          cache_text_embeddings: false
+
+          is_reg: false
+          network_weight: 1
+
+          # 512 px only — safe upper bound for 12 GB VRAM.
+          # 768 is possible but risks OOM; do not use 1024 on a 4070.
+          resolution: [512]
+
+          # Z-Image Turbo trainer expects these even for still-image datasets.
+          shrink_video_to_frames: true
+          num_frames: 1
+          do_i2v: true
+          flip_x: false
+          flip_y: false
+
+      # ── Training hyperparameters ──────────────────────────────────────────────
+      train:
+        batch_size: 1
+
+        # Effective batch = batch_size × gradient_accumulation = 2.
+        # Keeps VRAM usage flat while giving more stable gradient updates.
+        gradient_accumulation: 2
+
+        # 2500 steps for a multi-concept vocabulary LoRA without a trigger word.
+        # Each concept word (sai, tonfa, hakama …) needs enough exposure to bind
+        # reliably.  2000 is fine for a single concept; add ~500 when you are
+        # teaching 10+ distinct terms.  Watch your sample images at each 250-step
+        # checkpoint — stop early if the concepts are clearly recognisable.
+        steps: 2500
+
+        lr: 0.0001               # 1e-4 — standard starting LR for Turbo LoRAs
+        train_unet: true
+        train_text_encoder: false  # keep off; saves ~2 GB VRAM, rarely needed
+
+        gradient_checkpointing: true
+
+        # FlowMatch is the correct scheduler for Z-Image Turbo (Lumina/S3-DiT).
+        noise_scheduler: "flowmatch"
+
+        # 8-bit AdamW halves the optimiser state memory versus full AdamW.
+        optimizer: "adamw8bit"
+        optimizer_params:
+          weight_decay: 0.0001
+
+        timestep_type: "weighted"
+        content_or_style: "balanced"
+        loss_type: "mse"
+
+        unload_text_encoder: false
+        dtype: "bf16"
+
+        diff_output_preservation: false
+        skip_first_sample: false
+        force_first_sample: false
+        disable_sampling: false
+        bypass_guidance_embedding: false
+
+        ema_config:
+          use_ema: false
+
+      # ── Model ─────────────────────────────────────────────────────────────────
+      model:
+        # Local path (Docker mount).  Alternatively use the HF repo ID
+        # "Tongyi-MAI/Z-Image-Turbo" to let ai-toolkit download it, but
+        # the local path avoids repeated downloads across runs.
+        name_or_path: "/workspace/z/z-image-turbo.safetensors"
+
+        # Tells ai-toolkit which architecture/training logic to use.
+        arch: "zimage:turbo"
+
+        # ── Training adapter — DO NOT REMOVE ──────────────────────────────────
+        # Z-Image Turbo is a step-distilled model.  Training a LoRA on it
+        # directly degrades ("Turbo drift") within a few hundred steps.
+        # This adapter, created by Ostris, temporarily de-distills the model
+        # DURING training so your LoRA learns the concept cleanly.
+        # At INFERENCE you load ONLY your LoRA (not this adapter) and the
+        # model runs at full Turbo (8-step) speed.
+        # See: https://huggingface.co/ostris/zimage_turbo_training_adapter
+        assistant_lora_path: "/workspace/h/zimage_turbo_training_adapter_v1.safetensors"
+
+        # Quantise the transformer weights to save VRAM on 12 GB cards.
+        quantize: true
+        qtype: "qfloat8"
+
+        # Text encoder quantisation — enable this too if you hit OOM.
+        quantize_te: false
+        qtype_te: "qfloat8"
+
+        # low_vram enables additional memory-saving strategies.
+        # Keep true for 12 GB VRAM.
+        low_vram: true
+
+        # ── IMPORTANT BUG WORKAROUND ──────────────────────────────────────────
+        # Layer offloading (CPU offload) is currently broken for Z-Image Turbo
+        # in ai-toolkit and will throw an error if enabled.
+        # Both values MUST stay at 0.
+        layer_offloading: false
+        layer_offloading_text_encoder_percent: 0
+        layer_offloading_transformer_percent: 0
+
+      # ── Sample previews ───────────────────────────────────────────────────────
+      # Generates images every 250 steps so you can visually track convergence
+      # without waiting for the full run.  Check output/…/samples/ after each
+      # checkpoint.  Use a fixed seed so every checkpoint is directly comparable.
+      sample:
+        sampler: "flowmatch"
+        sample_every: 250
+        width: 512
+        height: 512
+
+        # 8 steps is the natural operating point for Turbo.
+        # guidance_scale: 0 is correct for guidance-distilled Turbo behaviour.
+        sample_steps: 8
+        guidance_scale: 0
+        seed: 42
+        walk_seed: false   # false = same noise every checkpoint → easy comparison
+        neg: ""
+
+        num_frames: 1
+        fps: 1
+
+        # Each prompt tests a specific concept word independently — no trigger token.
+        # This is how you will use the LoRA at inference too: just name the concept.
+        # If a concept word isn't working at step 1000+, check that word appears
+        # in enough captions and is spelled identically every time.
+        samples:
+          - prompt: "japanese martial arts, sai, gi, black belt, obi, dojo"
+          - prompt: "japanese martial arts, tonfa, hakama, white belt, obi"
+          - prompt: "japanese martial arts, bo staff, gi, brown belt, dojo"
+          - prompt: "japanese martial arts, nunchaku, hakama, purple belt"
+          - prompt: "japanese martial arts, katana, gi, red belt, obi"
+          - prompt: "japanese martial arts, hakama, traditional clothing"
+          - prompt: "japanese martial arts, gi, obi, white belt"

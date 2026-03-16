@@ -10,10 +10,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::image_utils::{get_image_files, open_image, resize_image_aspect_ratio};
 
-// Re-export the mistralrs-based implementation and shared constants.
-pub use crate::caption_mistral::{
-    MistralRsVlmCaptionModel, DEFAULT_CAPTION_MODEL_DIRNAME, DEFAULT_CAPTION_PROMPT,
+// aha/Qwen3-VL backend (active):
+pub use crate::caption_crane::{
+    AhaCaptionModel, DEFAULT_CAPTION_MODEL_DIRNAME, DEFAULT_CAPTION_PROMPT,
 };
+// mistralrs backend (commented out):
+// pub use crate::caption_mistral::{MistralRsVlmCaptionModel, DEFAULT_CAPTION_MODEL_DIRNAME, DEFAULT_CAPTION_PROMPT};
 // Candle/Qwen3 backend (commented out — compile with caption_qwen3 module to re-enable):
 // pub use crate::caption_qwen3::{CandleVlmCaptionModel, DEFAULT_CAPTION_MODEL_DIRNAME, DEFAULT_CAPTION_PROMPT};
 

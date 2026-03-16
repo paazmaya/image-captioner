@@ -1,4 +1,5 @@
 pub mod caption;
+pub mod caption_crane;
 pub mod caption_mistral;
 // pub mod caption_qwen3; // candle backend — uncomment to enable
 pub mod crop;

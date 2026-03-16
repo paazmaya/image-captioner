@@ -31,6 +31,7 @@ tempfile = "3.27.0"
 clap = { version = "4.6.0", features = ["derive"] }
 mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs", rev = "f0a1cded7360798f4f34e48ff8e9dba77da37688" }
 tokio = { version = "1", features = ["rt-multi-thread"] }
+aha = { git = "https://github.com/jhqxxx/aha" }
 
 [package.metadata.binstall]
 # https://github.com/cargo-bins/cargo-binstall

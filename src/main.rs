@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 use sesoko::caption::{
-    resolve_caption_model_path, run_caption_folder, MistralRsVlmCaptionModel, CaptionOptions,
+    resolve_caption_model_path, run_caption_folder, AhaCaptionModel, CaptionOptions,
     DEFAULT_CAPTION_PROMPT,
 };
 use sesoko::crop::YOLOCropper;
@@ -111,7 +111,7 @@ fn main() -> Result<()> {
             sidecar_dir,
         }) => {
             let model_dir = resolve_caption_model_path(model_path.as_deref())?;
-            let model = MistralRsVlmCaptionModel::load(model_dir, DEFAULT_CAPTION_PROMPT)?;
+            let model = AhaCaptionModel::load(model_dir, DEFAULT_CAPTION_PROMPT)?;
             let options = CaptionOptions {
                 folder,
                 output,
@@ -189,7 +189,7 @@ fn main() -> Result<()> {
             // Step 2: caption the cropped images; write a .txt sidecar next to each.
             println!("Captioning images in {}...", output_dir.display());
             let model_dir = resolve_caption_model_path(None)?;
-            let model = MistralRsVlmCaptionModel::load(model_dir, DEFAULT_CAPTION_PROMPT)?;
+            let model = AhaCaptionModel::load(model_dir, DEFAULT_CAPTION_PROMPT)?;
             let options = CaptionOptions {
                 folder: output_dir.clone(),
                 output: output_dir.join("captions.toml"),

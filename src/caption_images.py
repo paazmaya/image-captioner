@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-"""Image captioning script using Qwen3-VL-2B-Instruct.
+"""Image captioning script supporting multiple VL models.
 
 This script processes all images in a given folder and generates captions
-using the Qwen3-VL-2B-Instruct model, storing the results in a TOML file.
+using a selectable vision-language model, storing the results in a TOML file.
+
+Supported models:
+  caprl    - CapRL-Qwen3VL-2B (default) from internlm
+  qwen3vl  - Qwen3-VL-2B-Instruct from Qwen
 """
 
 import argparse
@@ -39,8 +43,26 @@ except ImportError:
         tomllib = None
 
 
-def load_model_and_processor() -> tuple[Qwen3VLForConditionalGeneration, Qwen3VLProcessor, str]:
-    """Load Qwen3-VL-4B-Instruct model and processor.
+# Paths to locally stored models, relative to this file's location
+_MODELS_DIR = Path(__file__).parent.parent / "models"
+
+MODEL_CHOICES: dict[str, Path] = {
+    # https://huggingface.co/internlm/CapRL-Qwen3VL-2B
+    "caprl": _MODELS_DIR / "CapRL-Qwen3VL-2B",
+    # https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct
+    "qwen3vl": _MODELS_DIR / "Qwen3-VL-2B-Instruct",
+}
+
+DEFAULT_MODEL = "caprl"
+
+
+def load_model_and_processor(
+    model_key: str = DEFAULT_MODEL,
+) -> tuple[Qwen3VLForConditionalGeneration, Qwen3VLProcessor, str]:
+    """Load a Qwen3-VL-based model and processor from local storage.
+
+    Args:
+        model_key: One of the keys in MODEL_CHOICES (e.g. "caprl", "qwen3vl").
 
     Returns:
         Tuple containing:
@@ -48,12 +70,10 @@ def load_model_and_processor() -> tuple[Qwen3VLForConditionalGeneration, Qwen3VL
             - Qwen3VLProcessor: The processor for handling inputs
             - str: Device string ("cuda" or "cpu")
     """
-    # https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct
-    # model_id = "H:\\vision-models\\Qwen_Qwen3-VL-4B-Instruct"
-    # https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct
-    model_id = "H:\\vision-models\\Qwen_Qwen3-VL-2B-Instruct"
+    model_path = MODEL_CHOICES[model_key]
+    model_id = str(model_path)
 
-    print(f"Loading model {model_id}...")
+    print(f"Loading model '{model_key}' from {model_id}...")
 
     model = Qwen3VLForConditionalGeneration.from_pretrained(
         model_id,
@@ -89,7 +109,7 @@ def generate_caption(
         Generated caption string
     """
     # Detailed prompt for martial arts - instruct model to respond in plain text
-    prompt = "Describe the image as a caption with less than 255 characters. It contains Japanese martial arts. What martial art is shown? Describe clothing, belt, technique, the surrounding area, what kind of emotions the person might show? Respond with plain text only, no formatting or markdown. Be firm, no guessing."
+    prompt = "Describe the image as a caption with less than 255 characters. It contains Japanese martial arts. What martial art is shown? What weapons are used, name them? Describe clothing, belt, technique. Respond with plain text only, no formatting or markdown. Be firm, no guessing."
 
     # Prepare inputs using chat template (following official example)
     messages = [
@@ -105,9 +125,14 @@ def generate_caption(
         }
     ]
 
-    # Prepare inputs - processor handles both images and text
-    # Note: Qwen3VLProcessor has dynamic typing, using type: ignore
-    inputs: dict[str, Any] = processor(messages, [image])  # type: ignore
+    # Apply chat template to get formatted text string, then call processor correctly
+    text: str = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)  # type: ignore
+    inputs: dict[str, Any] = processor(  # type: ignore
+        text=[text],
+        images=[image],
+        return_tensors="pt",
+        padding=True,
+    )
     inputs.pop("token_type_ids", None)
     inputs = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in inputs.items()}
 
@@ -131,7 +156,9 @@ def generate_caption(
 
 def main():
     """Main function."""
-    parser = argparse.ArgumentParser(description="Caption images using Qwen3-VL-2B-Instruct model")
+    parser = argparse.ArgumentParser(
+        description="Caption images using a selectable vision-language model"
+    )
     parser.add_argument("folder", type=str, help="Path to the folder containing images")
     parser.add_argument(
         "-o",
@@ -139,6 +166,16 @@ def main():
         type=str,
         default="captions.toml",
         help="Output TOML file path (default: captions.toml)",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        choices=list(MODEL_CHOICES.keys()),
+        default=DEFAULT_MODEL,
+        help=(
+            f"Vision-language model to use for captioning (default: {DEFAULT_MODEL}). "
+            "caprl=CapRL-Qwen3VL-2B, qwen3vl=Qwen3-VL-2B-Instruct"
+        ),
     )
     parser.add_argument(
         "--no-sidecar",
@@ -169,7 +206,7 @@ def main():
     print(f"Found {len(image_files)} image(s) to process")
 
     # Load model and processor
-    model, processor, device = load_model_and_processor()
+    model, processor, device = load_model_and_processor(args.model)
 
     # Determine output path and format
     output_path = Path(args.output)

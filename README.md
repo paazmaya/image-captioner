@@ -3,7 +3,7 @@
 > Prepare images for training machine learning models
 
 Two key features:
-* Image captioning for martial arts imagery using **Qwen3-VL-2B-Instruct**
+* Image captioning for martial arts imagery using **CapRL-Qwen3VL-2B** (default) or **Qwen3-VL-2B-Instruct**
 * Content aware cropping by using YOLO11
 
 ## Architecture
@@ -32,9 +32,15 @@ uv run python src/crop_yolo.py --input-dir my_images --output-dir cropped_images
 
 This project provides two main scripts for preparing images for machine learning training:
 
-### 1. Image Captioning with Qwen3-VL
+### 1. Image Captioning
 
-Generate detailed captions for images using **Qwen3-VL-2B-Instruct** model.
+Generate detailed captions for images using a selectable vision-language model.
+
+Available models (stored under `models/`):
+| Key | Model | VRAM |
+|-----|-------|------|
+| `caprl` *(default)* | CapRL-Qwen3VL-2B (internlm) | ~4-6 GB |
+| `qwen3vl` | Qwen3-VL-2B-Instruct (Qwen) | ~4-6 GB |
 
 **Features:**
 - 🚀 Ultra-fast inference with greedy decoding
@@ -46,7 +52,11 @@ Generate detailed captions for images using **Qwen3-VL-2B-Instruct** model.
 **Basic Usage:**
 
 ```bash
-uv run python scripts/caption_images.py "path/to/images"
+# Default model (CapRL-Qwen3VL-2B)
+uv run python src/caption_images.py "path/to/images"
+
+# Use Qwen3-VL-2B-Instruct instead
+uv run python src/caption_images.py "path/to/images" --model qwen3vl
 ```
 
 Output will be saved to `captions.toml` in the current folder and as sidecar `.txt` files alongside each image.
@@ -55,13 +65,13 @@ Output will be saved to `captions.toml` in the current folder and as sidecar `.t
 
 ```bash
 # Custom output path
-uv run python scripts/caption_images.py "path/to/images" -o my_captions.toml
+uv run python src/caption_images.py "path/to/images" -o my_captions.toml
 
 # Disable sidecar files (TOML only)
-uv run python scripts/caption_images.py "path/to/images" --no-sidecar
+uv run python src/caption_images.py "path/to/images" --no-sidecar
 
 # Write sidecar files to a different directory
-uv run python scripts/caption_images.py "Dropbox\images" --sidecar-dir "captions"
+uv run python src/caption_images.py "Dropbox\images" --sidecar-dir "captions"
 ```
 
 **Output Format:**
@@ -81,17 +91,6 @@ images/
   photo2.jpg
   photo2.jpg.txt
 ```
-
-**Configuration:**
-
-To use the higher-quality 4B model instead, edit the model ID in `scripts/caption_images.py` (~line 86):
-```python
-model_id = "Qwen/Qwen3-VL-4B-Instruct"
-```
-
-**Model Specs:**
-- 2B: ~4-6 GB VRAM, ultra-fast
-- 4B: ~6-8 GB VRAM, higher quality
 
 **Supported Image Formats:**
 - `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.bmp`, `.heic`, `.heif`, `.avif`

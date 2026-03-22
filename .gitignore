@@ -51,3 +51,6 @@ checkpoint-*/
 output*/
 
 .coverage
+
+models/
+target/

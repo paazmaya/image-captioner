@@ -5,7 +5,8 @@ This script processes all images in a given folder and generates captions
 using a selectable vision-language model, storing the results in a TOML file.
 
 Supported models:
-  caprl    - CapRL-Qwen3VL-2B (default) from internlm
+  blip     - Image-Captioning-Blip (default) from Amirhossein75 — fast, keyword-focused
+  caprl    - CapRL-Qwen3VL-2B from internlm
   qwen3vl  - Qwen3-VL-2B-Instruct from Qwen
 """
 
@@ -19,6 +20,8 @@ import torch
 from PIL import Image
 from transformers import (
     AutoProcessor,
+    BlipForConditionalGeneration,
+    BlipProcessor,
     Qwen3VLForConditionalGeneration,
     Qwen3VLProcessor,
 )
@@ -47,27 +50,29 @@ except ImportError:
 _MODELS_DIR = Path(__file__).parent.parent / "models"
 
 MODEL_CHOICES: dict[str, Path] = {
+    # https://huggingface.co/Amirhossein75/Image-Captioning-Blip
+    "blip": _MODELS_DIR / "Image-Captioning-Blip",
     # https://huggingface.co/internlm/CapRL-Qwen3VL-2B
     "caprl": _MODELS_DIR / "CapRL-Qwen3VL-2B",
     # https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct
     "qwen3vl": _MODELS_DIR / "Qwen3-VL-2B-Instruct",
 }
 
-DEFAULT_MODEL = "caprl"
+DEFAULT_MODEL = "blip"
 
 
 def load_model_and_processor(
     model_key: str = DEFAULT_MODEL,
-) -> tuple[Qwen3VLForConditionalGeneration, Qwen3VLProcessor, str]:
-    """Load a Qwen3-VL-based model and processor from local storage.
+) -> tuple[Any, Any, str]:
+    """Load a model and processor from local storage.
 
     Args:
-        model_key: One of the keys in MODEL_CHOICES (e.g. "caprl", "qwen3vl").
+        model_key: One of the keys in MODEL_CHOICES (e.g. "blip", "caprl", "qwen3vl").
 
     Returns:
         Tuple containing:
-            - Qwen3VLForConditionalGeneration: The loaded model
-            - Qwen3VLProcessor: The processor for handling inputs
+            - model: The loaded model
+            - processor: The processor for handling inputs
             - str: Device string ("cuda" or "cpu")
     """
     model_path = MODEL_CHOICES[model_key]
@@ -75,57 +80,87 @@ def load_model_and_processor(
 
     print(f"Loading model '{model_key}' from {model_id}...")
 
-    model = Qwen3VLForConditionalGeneration.from_pretrained(
-        model_id,
-        dtype=torch.bfloat16,
-        low_cpu_mem_usage=True,
-        device_map="auto",
-    )
-
-    processor = AutoProcessor.from_pretrained(model_id)
-
-    # Device is handled automatically by device_map="auto"
     device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    if model_key == "blip":
+        dtype = torch.float16 if device == "cuda" else torch.float32
+        model = BlipForConditionalGeneration.from_pretrained(
+            model_id,
+            torch_dtype=dtype,
+            low_cpu_mem_usage=True,
+        ).to(device)
+        processor = BlipProcessor.from_pretrained(model_id)
+    else:
+        model = Qwen3VLForConditionalGeneration.from_pretrained(
+            model_id,
+            dtype=torch.bfloat16,
+            low_cpu_mem_usage=True,
+            device_map="auto",
+        )
+        processor = AutoProcessor.from_pretrained(model_id)
+
     print(f"Using device: {device}")
 
     return model, processor, device
 
 
 def generate_caption(
-    model: Qwen3VLForConditionalGeneration,
-    processor: Qwen3VLProcessor,
+    model: Any,
+    processor: Any,
     image: Image.Image,
     device: str,
 ) -> str:
-    """Generate caption for an image using Qwen3-VL model.
+    """Generate caption for an image.
+
+    Dispatches to the appropriate captioning function based on model type.
 
     Args:
-        model: Qwen3-VL model for conditional generation
-        processor: Qwen3VL processor for handling images and text
+        model: Loaded model (BlipForConditionalGeneration or Qwen3VLForConditionalGeneration)
+        processor: Matching processor
         image: PIL Image object
         device: Device to use ("cuda" or "cpu")
 
     Returns:
         Generated caption string
     """
-    # Detailed prompt for martial arts - instruct model to respond in plain text
+    if isinstance(model, BlipForConditionalGeneration):
+        return _generate_caption_blip(model, processor, image, device)
+    return _generate_caption_qwen3vl(model, processor, image, device)
+
+
+def _generate_caption_blip(
+    model: BlipForConditionalGeneration,
+    processor: BlipProcessor,
+    image: Image.Image,
+    device: str,
+) -> str:
+    """Generate a concise, keyword-rich caption using BLIP."""
+    inputs = processor(images=image, return_tensors="pt").to(device)
+    with torch.no_grad():
+        outputs = model.generate(**inputs, max_new_tokens=50, num_beams=5)
+    caption: str = processor.decode(outputs[0], skip_special_tokens=True)
+    return caption.strip()
+
+
+def _generate_caption_qwen3vl(
+    model: Qwen3VLForConditionalGeneration,
+    processor: Qwen3VLProcessor,
+    image: Image.Image,
+    device: str,
+) -> str:
+    """Generate a detailed caption using Qwen3-VL."""
     prompt = "Describe the image as a caption with less than 255 characters. It contains Japanese martial arts. What martial art is shown? What weapons are used, name them? Describe clothing, belt, technique. Respond with plain text only, no formatting or markdown. Be firm, no guessing."
 
-    # Prepare inputs using chat template (following official example)
     messages = [
         {
             "role": "user",
             "content": [
                 {"type": "image", "image": image},
-                {
-                    "type": "text",
-                    "text": prompt,
-                },
+                {"type": "text", "text": prompt},
             ],
         }
     ]
 
-    # Apply chat template to get formatted text string, then call processor correctly
     text: str = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)  # type: ignore
     inputs: dict[str, Any] = processor(  # type: ignore
         text=[text],
@@ -136,7 +171,6 @@ def generate_caption(
     inputs.pop("token_type_ids", None)
     inputs = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in inputs.items()}
 
-    # Generate without trimming complexity
     with torch.no_grad():
         outputs = model.generate(
             **inputs,
@@ -144,13 +178,9 @@ def generate_caption(
             do_sample=False,
         )
 
-    # Simply decode the entire output
     caption = processor.batch_decode([outputs[0]], skip_special_tokens=True)[0]
-
-    # Remove the prompt part if it's in there
     if "assistant" in caption:
         caption = caption.split("assistant")[-1].strip()
-
     return caption
 
 
@@ -174,7 +204,7 @@ def main():
         default=DEFAULT_MODEL,
         help=(
             f"Vision-language model to use for captioning (default: {DEFAULT_MODEL}). "
-            "caprl=CapRL-Qwen3VL-2B, qwen3vl=Qwen3-VL-2B-Instruct"
+            "blip=Image-Captioning-Blip (fast), caprl=CapRL-Qwen3VL-2B, qwen3vl=Qwen3-VL-2B-Instruct"
         ),
     )
     parser.add_argument(
@@ -258,7 +288,8 @@ def main():
             if image is None:
                 print("Failed to open image")
                 continue
-            image = resize_image_aspect_ratio(image, target_size=896)
+            target_size = 512 if args.model == "blip" else 896
+            image = resize_image_aspect_ratio(image, target_size=target_size)
 
             # Generate caption
             caption = generate_caption(model, processor, image, device)

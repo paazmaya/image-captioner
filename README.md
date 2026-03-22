@@ -3,7 +3,7 @@
 > Prepare images for training machine learning models
 
 Two key features:
-* Image captioning for martial arts imagery using **CapRL-Qwen3VL-2B** (default) or **Qwen3-VL-2B-Instruct**
+* Image captioning for martial arts imagery using **Image-Captioning-Blip** (default), **CapRL-Qwen3VL-2B**, or **Qwen3-VL-2B-Instruct**
 * Content aware cropping by using YOLO11
 
 ## Architecture
@@ -39,23 +39,28 @@ Generate detailed captions for images using a selectable vision-language model.
 Available models (stored under `models/`):
 | Key | Model | VRAM |
 |-----|-------|------|
-| `caprl` *(default)* | CapRL-Qwen3VL-2B (internlm) | ~4-6 GB |
+| `blip` *(default)* | Image-Captioning-Blip (Amirhossein75) | ~1 GB |
+| `caprl` | CapRL-Qwen3VL-2B (internlm) | ~4-6 GB |
 | `qwen3vl` | Qwen3-VL-2B-Instruct (Qwen) | ~4-6 GB |
 
 **Features:**
-- 🚀 Ultra-fast inference with greedy decoding
-- 💾 Minimal VRAM (~4-6 GB) - fits on any modern GPU
-- ✨ High quality captions for martial arts images
+- 🚀 Ultra-fast inference — BLIP uses beam search on a tiny model (~1 GB VRAM)
+- 🔑 Keyword-rich, concise descriptions from BLIP out of the box
+- 💾 Minimal VRAM — BLIP ~1 GB, Qwen3-VL models ~4-6 GB
+- ✨ Detailed captions for martial arts images with Qwen3-VL models
 - 🔄 Streaming writes - recovers from interruptions
 - 📝 Plain text output - no markdown formatting
 
 **Basic Usage:**
 
 ```bash
-# Default model (CapRL-Qwen3VL-2B)
+# Default model (Image-Captioning-Blip) - fast, keyword-focused
 uv run python src/caption_images.py "path/to/images"
 
-# Use Qwen3-VL-2B-Instruct instead
+# Use CapRL-Qwen3VL-2B for detailed martial arts captions
+uv run python src/caption_images.py "path/to/images" --model caprl
+
+# Use Qwen3-VL-2B-Instruct
 uv run python src/caption_images.py "path/to/images" --model qwen3vl
 ```
 
@@ -97,7 +102,7 @@ images/
 
 **Troubleshooting:**
 
-- **OOM (Out of Memory):** Use 2B model or reduce image size in `resize_image()` (currently 896x896)
+- **OOM (Out of Memory):** Use `--model blip` (default, ~1 GB VRAM) or reduce image size in `resize_image()` (Qwen3-VL uses 896px, BLIP uses 512px)
 - **Permission denied:** Use `--no-sidecar` or `--sidecar-dir` for cloud storage (Dropbox, OneDrive, etc.)
 - **Slow inference:** Ensure CUDA is properly detected with `nvidia-smi`, check Flash Attention 2 installation
 

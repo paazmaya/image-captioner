@@ -5,7 +5,8 @@ This script processes all images in a given folder and generates captions
 using a selectable vision-language model, storing the results in a TOML file.
 
 Supported models:
-  blip     - Image-Captioning-Blip (default) from Amirhossein75 — fast, keyword-focused
+  qwen8b   - Qwen3-VL-8B-Abliterated-Caption-it Q2 GGUF (default) — high quality, runs via llama-cpp
+  blip     - Image-Captioning-Blip from Amirhossein75 — fast, keyword-focused
   caprl    - CapRL-Qwen3VL-2B from internlm
   qwen3vl  - Qwen3-VL-2B-Instruct from Qwen
 """
@@ -20,6 +21,7 @@ import torch
 from PIL import Image
 from transformers import (
     AutoProcessor,
+    BitsAndBytesConfig,
     BlipForConditionalGeneration,
     BlipProcessor,
     Qwen3VLForConditionalGeneration,
@@ -58,16 +60,23 @@ MODEL_CHOICES: dict[str, Path] = {
     "qwen3vl": _MODELS_DIR / "Qwen3-VL-2B-Instruct",
 }
 
-DEFAULT_MODEL = "blip"
+# Models that share the Qwen3VL architecture and inference path
+QWEN_MODELS = {"caprl", "qwen3vl"}
+
+DEFAULT_MODEL = "qwen3vl"
 
 
 def load_model_and_processor(
     model_key: str = DEFAULT_MODEL,
+    quantize: str = "int8",
 ) -> tuple[Any, Any, str]:
     """Load a model and processor from local storage.
 
     Args:
         model_key: One of the keys in MODEL_CHOICES (e.g. "blip", "caprl", "qwen3vl").
+        quantize: Quantization level for Qwen transformer models: "none", "int8", or "int4".
+                  Ignored for BLIP and GGUF models. int8 halves VRAM; int4 quarters it.
+                  Only effective when a CUDA device is available.
 
     Returns:
         Tuple containing:
@@ -91,15 +100,36 @@ def load_model_and_processor(
         ).to(device)
         processor = BlipProcessor.from_pretrained(model_id)
     else:
+        bnb_config = None
+        if quantize != "none" and device == "cuda":
+            if quantize == "int4":
+                bnb_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=torch.bfloat16,
+                    bnb_4bit_use_double_quant=True,
+                    bnb_4bit_quant_type="nf4",
+                )
+            else:  # int8
+                bnb_config = BitsAndBytesConfig(load_in_8bit=True)
+        elif quantize != "none" and device == "cpu":
+            print(
+                f"Warning: --quantize {quantize} requires CUDA; skipping quantization.",
+                file=sys.stderr,
+            )
+
         model = Qwen3VLForConditionalGeneration.from_pretrained(
             model_id,
             dtype=torch.bfloat16,
             low_cpu_mem_usage=True,
             device_map="auto",
+            quantization_config=bnb_config,
         )
         processor = AutoProcessor.from_pretrained(model_id)
 
-    print(f"Using device: {device}")
+    print(
+        f"Using device: {device}"
+        + (f" | quantize={quantize}" if quantize != "none" and model_key not in ("blip",) else "")
+    )
 
     return model, processor, device
 
@@ -109,6 +139,7 @@ def generate_caption(
     processor: Any,
     image: Image.Image,
     device: str,
+    model_key: str = DEFAULT_MODEL,
 ) -> str:
     """Generate caption for an image.
 
@@ -119,13 +150,14 @@ def generate_caption(
         processor: Matching processor
         image: PIL Image object
         device: Device to use ("cuda" or "cpu")
+        model_key: Key from MODEL_CHOICES used to select prompt strategy.
 
     Returns:
         Generated caption string
     """
     if isinstance(model, BlipForConditionalGeneration):
         return _generate_caption_blip(model, processor, image, device)
-    return _generate_caption_qwen3vl(model, processor, image, device)
+    return _generate_caption_qwen3vl(model, processor, image, device, model_key)
 
 
 def _generate_caption_blip(
@@ -147,9 +179,26 @@ def _generate_caption_qwen3vl(
     processor: Qwen3VLProcessor,
     image: Image.Image,
     device: str,
+    model_key: str = "qwen3vl",
 ) -> str:
-    """Generate a detailed caption using Qwen3-VL."""
-    prompt = "Describe the image as a caption with less than 255 characters. It contains Japanese martial arts. What martial art is shown? What weapons are used, name them? Describe clothing, belt, technique. Respond with plain text only, no formatting or markdown. Be firm, no guessing."
+    """Generate a detailed caption using a Qwen3-VL-based model.
+
+    CapRL uses a concise captioning prompt (it is already RL fine-tuned for detailed
+    captioning), while the base qwen3vl model is guided with a domain-specific prompt.
+    """
+    prompt = (
+        "You are analyzing a Japanese martial arts photograph. "
+        "Identify exactly: (1) the martial art (e.g. karate, judo, aikido, kendo, iaido, naginata, kobudo, jujutsu); "
+        "(2) the specific technique or kata name if visible (use Japanese term); "
+        "(3) any weapons held or used — name each precisely (e.g. bokken, jo, nunchaku, sai, katana, naginata, tonfa); "
+        "(4) practitioner clothing: gi color, hakama if present; "
+        "(5) belt color or rank insignia; "
+        "(6) stance or body position (e.g. zanshin, gedan-barai, chudan-zuki). "
+        "Only provide information that is clearly visible in the image. Do not tell what is not there."
+        "Write a single plain-text sentence under 255 characters. "
+        "Reply only with the positive identifications you are certain of, and do not include any information that is not clearly visible in the image. "
+        "No markdown, no bullet points, no guessing — only describe what is clearly visible."
+    )
 
     messages = [
         {
@@ -208,6 +257,17 @@ def main():
         ),
     )
     parser.add_argument(
+        "--quantize",
+        type=str,
+        choices=["none", "int8", "int4"],
+        default="int8",
+        help=(
+            "Quantize Qwen transformer models with bitsandbytes (default: int8). "
+            "int8 halves VRAM and speeds up inference; int4 quarters VRAM. "
+            "Has no effect on blip or qwen8b (GGUF). Requires CUDA."
+        ),
+    )
+    parser.add_argument(
         "--no-sidecar",
         action="store_true",
         help="Disable creation of sidecar .txt files with captions",
@@ -236,7 +296,7 @@ def main():
     print(f"Found {len(image_files)} image(s) to process")
 
     # Load model and processor
-    model, processor, device = load_model_and_processor(args.model)
+    model, processor, device = load_model_and_processor(args.model, args.quantize)
 
     # Determine output path and format
     output_path = Path(args.output)
@@ -292,7 +352,7 @@ def main():
             image = resize_image_aspect_ratio(image, target_size=target_size)
 
             # Generate caption
-            caption = generate_caption(model, processor, image, device)
+            caption = generate_caption(model, processor, image, device, args.model)
 
             # Store with relative path as key under the folder section
             relative_path = image_path.relative_to(folder_path).as_posix()
